@@ -1,0 +1,172 @@
+---
+title: "2019 Boston Marathon Visualization, by Tamarine Cornelius"
+output: html_notebook
+---
+
+Here are graphical representations of the 2019 Boston Marathon participants. 
+
+```{r}
+library(readr)
+library(countrycode)
+library(treemap)
+library(dplyr)
+library(ggplot2)
+library(zipcode)
+library(tidyverse)
+library(maps)
+library(ggthemes)
+library(mapproj)
+library(forcats)
+library(hms)
+
+
+boston <- read_csv("Runners_all_results.csv")
+```
+
+```{r}
+#Chart 1: A treemap showing where runners are from
+#countrycode package includes a function that links country name to continent
+
+boston$continent <- countrycode(sourcevar = boston$CountryOfResName,
+                                origin = "country.name",
+                                destination = "continent")
+```
+
+```{r echo=FALSE, results='asis'}
+    options(knitr.kable.NA = '')
+    knitr::kable(lowerTri, digits=2)
+#grouping the data by country and continent
+country_summary <- 
+  boston %>% 
+  group_by(CountryOfResAbbrev, continent) %>% 
+  summarise(n())
+
+names(country_summary)[3] <- "count_of_runners"
+
+#Combining countries that have fewer than 150 runners into an "other" category
+country_summary$comb <- 
+  ifelse(country_summary$count_of_runners <150, 
+         "other", 
+         country_summary$CountryOfResAbbrev)
+
+#check our country summary
+country_summary
+```
+```{r}
+#Sorting data so the largest categories show up first in treemap
+#But if the "other" category in a continent is large, I want to that show up at the end of the treemap categorycountry_summary <- arrange(country_summary, desc(count_of_runners))
+country_summary$sort_order <- ifelse(country_summary$comb == "other", 1000,seq.int(nrow(country_summary) ))
+```
+
+```{r echo=FALSE, results='asis'}
+    options(knitr.kable.NA = '')
+   
+#creating treemap
+treemap(country_summary,
+        index = c("continent", "CountryOfResAbbrev"),
+        vSize = "count_of_runners",
+        type = "index", 
+        title = "Country of Residence, 2019 Boston Marathon Participants",
+        lowerbound.cex.labels = .5,
+        align.labels=list(c("center", "center"), c("left", "top")),
+        bg.labels = "#CCCCCCaa",
+        border.col = "#CCCCCCaa",
+        palette = "Pastel2"
+        ) 
+```
+
+```{r echo=FALSE, results='asis'}
+    options(knitr.kable.NA = '')
+#Chart 2: Scatterplot showing only runners from Wisconsin
+#subset data
+cheeseheads <- boston[which (boston$StateAbbrev =="WI"),]
+
+#create plot, showing myself!
+scatter_cheeseheads <- ggplot(cheeseheads, aes(x = OfficialTime, y = AgeOnRaceDay, color = Gender, show.legend = FALSE)) +
+  geom_point(alpha = 0.8, pch = 21, show.legend = TRUE) +
+  geom_point( data = cheeseheads[cheeseheads$FullName == "Tamarine Cornelius",], color = "gray22", show.legend = FALSE, pch = 21)+
+  geom_text(data = cheeseheads[cheeseheads$FullName == "Tamarine Cornelius",], aes(label = "Tamarine"), show.legend = FALSE, hjust = .5, vjust = 1, color = "gray22")+
+  facet_wrap(.~Gender) + 
+  theme_light()+
+  scale_color_manual(values=c("#E69F00", "steelblue")) +
+  labs(x = "Time", y = "Age", title = "Wisconsin Residents Who Ran the 2019 Boston Marathon", subtitle = "Time and Age for Cheeseheads")
+  
+scatter_cheeseheads
+```
+
+```{r}
+#Chart 3: US dot map showing zip code origin of runners
+boston_map <- boston
+data("zipcode")
+
+#make sure zip codes are clean
+boston_map$zip <- clean.zipcodes(boston_map$Zip)
+
+#summarize zip code information
+boston.zip <- aggregate(data.frame(count = boston_map$BibNumber), list(zip = boston_map$zip), length)
+boston_map_zip <- merge(boston.zip, zipcode, by = "zip")
+
+us <- map_data("state")
+dot_us <- ggplot(boston_map_zip,aes(longitude,latitude) ) +
+  geom_polygon(data=us, aes(x=long,y=lat,group=group),color='gray',fill=NA,alpha=.35)+
+  geom_point(aes(),color = "orange", size=.8,alpha=.1, show.legend = FALSE, na.rm = TRUE) +
+  xlim(-125,-65)+ylim(20,50) +
+  coord_map("albers",lat0=39, lat1=45) +
+  theme_map() +
+  labs(title = "Where do 2019 Boston Marathon Participants Live?") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+dot_us
+```
+```{r}
+#Chart 4: bar chart of age of runners
+ggplot(boston, aes(AgeOnRaceDay)) +
+  geom_bar(aes(fill = Gender),
+    position = "dodge", na.rm = TRUE)+
+  labs(title = "Age of 2019 Boston Marathon Participants", subtitle = "Note how counts spike every five years of age with new time standards to qualify", x = "Age") 
+
+```
+```{r fig.width = 6, fig.height = 8, echo=FALSE, results='asis'}
+    options(knitr.kable.NA = '')
+  
+#Chart 5: Avg finishing time by state
+#filter out Canadian provinces and overseas territories
+state_summary <- 
+  boston %>% 
+  filter(CountryOfResAbbrev == "USA") %>% 
+  group_by(StateAbbrev, StateName, CountryOfResAbbrev) %>% 
+  summarise(mean = mean(OfficialTime), count = n()) %>% 
+  filter(count >10) 
+
+#format finishing time correctly
+state_summary$format_time <- as.hms(state_summary$mean)
+
+#order times
+bar_chart <- state_summary %>%
+  ungroup(StateAbbrev) %>%
+  mutate(StateAbbrev = fct_reorder(StateAbbrev, format_time, .desc = TRUE))
+
+ggplot(bar_chart, aes(y = StateAbbrev, x = format_time)) +
+  geom_point(aes(), col = "orange", size = 3) +
+  labs(title = "Average Finishing Time by State", subtitle = "2019 Boston Marathon Participants", x = "Finishing Time", y = "State") 
+```
+```{r echo=FALSE, results='asis'}
+    options(knitr.kable.NA = '')
+#Chart 6: Bib number by finishing time
+#People with bib numbers under about 24000 have run a previous marathon to qualify for Boston. The faster the qualifying marathon time, the lower the bib number. People with bib numbers over 24000 are running to raise money for charity and did not have to qualify.
+
+boston$BibNumber <- as.numeric(boston$BibNumber)
+
+scatter_bib <- ggplot(boston, aes(x = OfficialTime, y = BibNumber, show.legend = FALSE)) +
+  geom_point(alpha = 0.2, pch = 16, size = 0.1, color = "steelblue") +
+  annotate("text", x = 11500, y = 4500, label ="Wave 1")+
+  annotate("text", x = 12500, y = 12000, label ="Wave 2")+
+  annotate("text", x = 14000, y = 20000, label ="Wave 3")+
+  annotate("text", x = 15500, y = 28000, label ="Wave 4")+
+  theme_minimal()+
+  labs(x = "Time", y = "Bib #", title = "Bib Number and Finishing Time", subtitle = "2019 Boston Marathon")  +
+  scale_x_time(limits = c(9000, 24000))
+  
+suppressWarnings(print(scatter_bib))
+```
+
